@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>Медитация — квадратное дыхание</title>
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: radial-gradient(circle at center, #1a1a2e 0%, #050510 60%, #000000 100%);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+      color: #f5f5f5;
+    }
+
+    canvas { display: block; }
+
+    .ui-overlay {
+      position: fixed;
+      top: 20px;
+      left: 0;
+      width: 100%;
+      text-align: center;
+      pointer-events: none;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.75);
+    }
+
+    .ui-phase {
+      font-size: 14px;
+      margin-top: 6px;
+      letter-spacing: 0.18em;
+    }
+
+    .ui-quality {
+      position: fixed;
+      bottom: 20px;
+      left: 0;
+      width: 100%;
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      pointer-events: auto;
+      color: rgba(255, 255, 255, 0.7);
+      flex-wrap: wrap;
+    }
+
+    .ui-quality-label {
+      align-self: center;
+      opacity: 0.8;
+    }
+
+    .quality-button,
+    .sound-button,
+    .sound-mode-button {
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      background: rgba(0, 0, 0, 0.35);
+      padding: 6px 10px;
+      border-radius: 999px;
+      cursor: pointer;
+      font: inherit;
+      color: inherit;
+      text-transform: inherit;
+      letter-spacing: inherit;
+      transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+    }
+
+    .quality-button:hover,
+    .sound-button:hover,
+    .sound-mode-button:hover {
+      border-color: rgba(255, 255, 255, 0.5);
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .quality-button.active,
+    .sound-button.active,
+    .sound-mode-button.active {
+      border-color: rgba(255, 255, 255, 0.9);
+      background: rgba(255, 255, 255, 0.18);
+      color: #ffffff;
+    }
+
+    .sound-modes-label {
+      align-self: center;
+      opacity: 0.8;
+      margin-left: 12px;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+
+  <div class="ui-overlay">
+    КВАДРАТНОЕ ДЫХАНИЕ · 4–4–4–4
+    <div id="phase" class="ui-phase"></div>
+  </div>
+
+  <div class="ui-quality">
+    <span class="ui-quality-label">Качество:</span>
+    <button class="quality-button active" data-quality="low">Низкое</button>
+    <button class="quality-button" data-quality="normal">Обычное</button>
+    <button class="quality-button" data-quality="high">Высокое</button>
+
+    <button class="sound-button" id="soundToggle">Звук: выкл</button>
+
+    <span class="sound-modes-label">Саунд-пресет:</span>
+    <button class="sound-mode-button" data-sound-mode="hold-ticks">4 тика на задержках</button>
+    <button class="sound-mode-button active" data-sound-mode="creative">852 волна + тики</button>
+    <button class="sound-mode-button" data-sound-mode="bg-852">852 фон + тики</button>
+    <button class="sound-mode-button" data-sound-mode="bg-852-only">852 фон (без тиков)</button>
+  </div>
+
+  <script>
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    const phaseLabel = document.getElementById("phase");
+    const soundToggleBtn = document.getElementById("soundToggle");
+
+    const QUALITY_PRESETS = {
+      low: {
+        particleCount: 350,
+        minRadius: 70,
+        maxRadius: 150,
+        shadowBlur: 8,
+        fogMultiplier: 1.1,
+        maxDpr: 1.0
+      },
+      normal: {
+        particleCount: 900,
+        minRadius: 80,
+        maxRadius: 180,
+        shadowBlur: 14,
+        fogMultiplier: 1.4,
+        maxDpr: 1.5
+      },
+      high: {
+        particleCount: 1500,
+        minRadius: 90,
+        maxRadius: 210,
+        shadowBlur: 18,
+        fogMultiplier: 1.6,
+        maxDpr: 2.0
+      }
+    };
+
+    let currentQuality = "low";
+    let settings = QUALITY_PRESETS[currentQuality];
+
+    const CYCLE_DURATION = 16;
+    const PHASE_DURATION = 4;
+
+    const SHIMMER_SPEED = 0.6;
+    const SHIMMER_AMPL  = 0.45;
+    const SHIMMER_BASE  = 0.55;
+
+    let dpr = 1;
+    const particles = [];
+
+    function resize() {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+
+      const deviceDpr = window.devicePixelRatio || 1;
+      dpr = Math.min(deviceDpr, settings.maxDpr);
+
+      canvas.width = w * dpr;
+      canvas.height = h * dpr;
+      canvas.style.width = w + "px";
+      canvas.style.height = h + "px";
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    window.addEventListener("resize", resize);
+
+    function createParticles(count) {
+      particles.length = 0;
+      const n = count ?? settings.particleCount;
+
+      for (let i = 0; i < n; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const radiusFactor = Math.sqrt(Math.random());
+        const phase = Math.random() * Math.PI * 2;
+        const size = 1.4 + Math.random() * 1.6;
+
+        particles.push({ angle, radiusFactor, phase, size });
+      }
+    }
+
+    function easeBreath(t) {
+      const s = t * t * (3 - 2 * t);
+      return s * s * (3 - 2 * s);
+    }
+
+    function getBreathRadius(phaseIndex, tInPhase) {
+      const minR = settings.minRadius;
+      const maxR = settings.maxRadius;
+      let radius;
+
+      switch (phaseIndex) {
+        case 0: {
+          const e = easeBreath(tInPhase);
+          radius = minR + (maxR - minR) * e;
+          phaseLabel.textContent = "ВДОХ · РАСШИРЕНИЕ";
+          break;
+        }
+        case 1:
+          radius = maxR;
+          phaseLabel.textContent = "ЗАДЕРЖКА · НАПОЛНЕНИЕ";
+          break;
+        case 2: {
+          const e = easeBreath(tInPhase);
+          radius = maxR - (maxR - minR) * e;
+          phaseLabel.textContent = "ВЫДОХ · СЖАТИЕ";
+          break;
+        }
+        case 3:
+        default:
+          radius = minR;
+          phaseLabel.textContent = "ЗАДЕРЖКА · ПУСТОТА";
+          break;
+      }
+
+      return radius;
+    }
+
+    // ---------- АУДИО ----------
+
+    let audioCtx = null;
+    let audioEnabled = false;
+    let holdTickTimeouts = [];
+    let topTickTimeouts = [];
+    let prevPhaseIndex = null;
+    let currentPhaseIndex = 0;
+    let currentTInPhase = 0;
+
+    let breathOsc = null;
+    let breathGain = null;
+    let breathFilter = null;
+
+    // soundMode:
+    // "hold-ticks"   – только тики на задержках, без тона
+    // "creative"     – 852 волна + тики на задержках
+    // "bg-852"       – постоянный фон 852 + тики на задержках
+    // "bg-852-only"  – постоянный фон 852, без тиков
+    let soundMode = "creative";
+
+    function initAudioContext() {
+      if (!audioCtx) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return;
+        audioCtx = new AC();
+      }
+    }
+
+    function startBreathTone() {
+      if (!audioCtx || breathOsc) return;
+
+      breathOsc = audioCtx.createOscillator();
+      breathGain = audioCtx.createGain();
+      breathFilter = audioCtx.createBiquadFilter();
+
+      breathOsc.type = "sine";
+      breathFilter.type = "lowpass";
+      breathFilter.frequency.setValueAtTime(1000, audioCtx.currentTime);
+
+      breathGain.gain.setValueAtTime(0, audioCtx.currentTime);
+
+      breathOsc.connect(breathFilter);
+      breathFilter.connect(breathGain);
+      breathGain.connect(audioCtx.destination);
+
+      breathOsc.start();
+    }
+
+    function clearAllTicks() {
+      holdTickTimeouts.forEach(id => clearTimeout(id));
+      topTickTimeouts.forEach(id => clearTimeout(id));
+      holdTickTimeouts = [];
+      topTickTimeouts = [];
+    }
+
+    function stopAllAudio() {
+      clearAllTicks();
+      if (audioCtx && breathGain) {
+        const now = audioCtx.currentTime;
+        breathGain.gain.cancelScheduledValues(now);
+        breathGain.gain.setTargetAtTime(0, now, 0.05);
+      }
+    }
+
+    function playTick() {
+      if (!audioEnabled || !audioCtx) return;
+
+      const now = audioCtx.currentTime;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      const filter = audioCtx.createBiquadFilter();
+
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(420, now);
+
+      filter.type = "lowpass";
+      filter.frequency.setValueAtTime(1000, now);
+
+      gain.gain.setValueAtTime(0.0, now);
+      gain.gain.linearRampToValueAtTime(0.16, now + 0.02);
+      gain.gain.linearRampToValueAtTime(0.0, now + 0.22);
+
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      osc.start(now);
+      osc.stop(now + 0.3);
+    }
+
+    function playSoftTick() {
+      if (!audioEnabled || !audioCtx) return;
+
+      const now = audioCtx.currentTime;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      const filter = audioCtx.createBiquadFilter();
+
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(420, now);
+
+      filter.type = "lowpass";
+      filter.frequency.setValueAtTime(900, now);
+
+      gain.gain.setValueAtTime(0.0, now);
+      gain.gain.linearRampToValueAtTime(0.08, now + 0.02);
+      gain.gain.linearRampToValueAtTime(0.0, now + 0.22);
+
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      osc.start(now);
+      osc.stop(now + 0.3);
+    }
+
+    function scheduleBottomTicks() {
+      holdTickTimeouts.forEach(id => clearTimeout(id));
+      holdTickTimeouts = [];
+      if (!audioEnabled || !audioCtx) return;
+
+      for (let i = 0; i < 4; i++) {
+        const id = setTimeout(() => {
+          if (!audioEnabled || !audioCtx) return;
+          playTick();
+        }, i * 1000);
+        holdTickTimeouts.push(id);
+      }
+    }
+
+    function scheduleTopTicks() {
+      topTickTimeouts.forEach(id => clearTimeout(id));
+      topTickTimeouts = [];
+      if (!audioEnabled || !audioCtx) return;
+
+      for (let i = 0; i < 4; i++) {
+        const id = setTimeout(() => {
+          if (!audioEnabled || !audioCtx) return;
+          playSoftTick();
+        }, i * 1000);
+        topTickTimeouts.push(id);
+      }
+    }
+
+    function getBreathToneParams(phaseIndex, tInPhase) {
+      // режим без тона — только тики
+      if (soundMode === "hold-ticks") {
+        return { freq: 260, gain: 0 };
+      }
+
+      // bg-852 или bg-852-only — ровный 852 фон
+      if (soundMode === "bg-852" || soundMode === "bg-852-only") {
+        return { freq: 852, gain: 0.045 };
+      }
+
+      // creative — 852 волна
+      const lowFreq = 260;
+      const highFreq = 852;
+      const maxGain = 0.05;
+
+      let freq = lowFreq;
+      let gain = 0;
+
+      switch (phaseIndex) {
+        case 0: {
+          const e = easeBreath(tInPhase);
+          freq = lowFreq + (highFreq - lowFreq) * e;
+          gain = maxGain * e;
+          break;
+        }
+        case 1: {
+          freq = highFreq;
+          gain = maxGain;
+          break;
+        }
+        case 2: {
+          const e = easeBreath(tInPhase);
+          freq = highFreq + (lowFreq - highFreq) * e;
+          gain = maxGain * (1 - e);
+          break;
+        }
+        case 3:
+        default: {
+          freq = lowFreq;
+          gain = 0;
+          break;
+        }
+      }
+
+      return { freq, gain };
+    }
+
+    function updateBreathTone(phaseIndex, tInPhase) {
+      if (!audioEnabled || !audioCtx || !breathOsc || !breathGain) return;
+      const { freq, gain } = getBreathToneParams(phaseIndex, tInPhase);
+      const now = audioCtx.currentTime;
+
+      breathOsc.frequency.setTargetAtTime(freq, now, 0.08);
+      breathGain.gain.setTargetAtTime(gain, now, 0.12);
+    }
+
+    function handlePhaseChange(newIndex) {
+      if (!audioEnabled || !audioCtx) return;
+
+      clearAllTicks();
+
+      // режим "852 фон (без тиков)" — никаких тиков вообще
+      if (soundMode === "bg-852-only") {
+        return;
+      }
+
+      // во всех остальных трёх режимах — тики на задержках
+      if (newIndex === 1) {
+        scheduleTopTicks();
+      } else if (newIndex === 3) {
+        scheduleBottomTicks();
+      }
+    }
+
+    soundToggleBtn.addEventListener("click", () => {
+      audioEnabled = !audioEnabled;
+
+      if (audioEnabled) {
+        initAudioContext();
+        if (!audioCtx) return;
+        audioCtx.resume();
+        startBreathTone();
+        soundToggleBtn.textContent = "Звук: вкл";
+        soundToggleBtn.classList.add("active");
+      } else {
+        soundToggleBtn.textContent = "Звук: выкл";
+        soundToggleBtn.classList.remove("active");
+        stopAllAudio();
+      }
+    });
+
+    const soundModeButtons = document.querySelectorAll(".sound-mode-button");
+    soundModeButtons.forEach(btn => {
+      btn.addEventListener("click", () => {
+        const mode = btn.getAttribute("data-sound-mode");
+        if (!mode) return;
+
+        soundMode = mode;
+
+        soundModeButtons.forEach(b => b.classList.toggle("active", b === btn));
+
+        updateBreathTone(currentPhaseIndex, currentTInPhase);
+      });
+    });
+
+    // ---------- КАЧЕСТВО ----------
+
+    function setQuality(name) {
+      if (!QUALITY_PRESETS[name]) return;
+      currentQuality = name;
+      settings = QUALITY_PRESETS[name];
+
+      document.querySelectorAll(".quality-button").forEach(btn => {
+        btn.classList.toggle("active", btn.dataset.quality === name);
+      });
+
+      resize();
+      createParticles(settings.particleCount);
+    }
+
+    document.querySelectorAll(".quality-button").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const q = btn.dataset.quality;
+        setQuality(q);
+      });
+    });
+
+    // ---------- РЕНДЕР ----------
+
+    let startTime = performance.now();
+
+    function render() {
+      const nowMs = performance.now();
+      const t = (nowMs - startTime) / 1000;
+
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      const cx = width / 2;
+      const cy = height / 2;
+
+      const tCycle = (t % CYCLE_DURATION);
+      const phaseIndex = Math.floor(tCycle / PHASE_DURATION);
+      const tInPhase = (tCycle % PHASE_DURATION) / PHASE_DURATION;
+
+      currentPhaseIndex = phaseIndex;
+      currentTInPhase = tInPhase;
+
+      if (phaseIndex !== prevPhaseIndex) {
+        handlePhaseChange(phaseIndex);
+        prevPhaseIndex = phaseIndex;
+      }
+
+      updateBreathTone(phaseIndex, tInPhase);
+
+      ctx.clearRect(0, 0, width, height);
+
+      const fogRadius = settings.maxRadius * settings.fogMultiplier;
+      const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, fogRadius);
+      grad.addColorStop(0, "rgba(255, 255, 255, 0.06)");
+      grad.addColorStop(1, "rgba(0, 0, 0, 0)");
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(cx, cy, fogRadius, 0, Math.PI * 2);
+      ctx.fill();
+
+      const breathRadius = getBreathRadius(phaseIndex, tInPhase);
+
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.shadowBlur = settings.shadowBlur;
+      ctx.shadowColor = "rgba(180, 210, 255, 0.7)";
+
+      for (const p of particles) {
+        const r = breathRadius * p.radiusFactor;
+        const x = cx + Math.cos(p.angle) * r;
+        const y = cy + Math.sin(p.angle) * r;
+
+        const shimmer = Math.sin(t * SHIMMER_SPEED + p.phase);
+        const alpha = SHIMMER_BASE + SHIMMER_AMPL * shimmer;
+
+        ctx.beginPath();
+        ctx.fillStyle = `rgba(220, 235, 255, ${alpha.toFixed(3)})`;
+        ctx.arc(x, y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.restore();
+
+      requestAnimationFrame(render);
+    }
+
+    // старт
+    resize();
+    createParticles(settings.particleCount);
+    render();
+  </script>
+</body>
+</html>
